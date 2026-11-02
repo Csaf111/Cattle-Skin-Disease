@@ -147,4 +147,4 @@ if not model_ready:
     print("WARNING: Model not loaded! Run model training script first.")
 
 if __name__ == '__main__':
-    app.run(port=5000, debug=True)
+    app.run(port=5000, debug=os.environ.get('FLASK_DEBUG') == '1')
