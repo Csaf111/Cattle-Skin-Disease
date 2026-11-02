@@ -10,16 +10,43 @@ import { requireAuth } from './middleware/authMiddleware.js';
 import passport from './config/passport.js';
 import axios from 'axios';
 import dashboardRoutes from './routes/dashboard.js';
+import Image from './models/Image.js';
+import mongoose from 'mongoose';
+import { getRuntimeConfig } from './config/runtime.js';
 
-const PORT = process.env.PORT || 8000;
-console.log(PORT)
+const config = getRuntimeConfig();
 
 const app = express();
+
+app.set('trust proxy', 1);
+app.use(express.json());
+
+app.use(cors({
+  origin: config.frontendOrigins,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Access-Control-Allow-Credentials']
+}));
+
+app.use(session({
+  secret: config.sessionSecret,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: config.isProduction,
+    maxAge: 24 * 60 * 60 * 1000,
+    httpOnly: true,
+    sameSite: 'lax'
+  }
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
 
 // Communicating with flask Microservice
 app.get('/home', async (req, res) => {
   try {
-    const response = await axios.get('http://localhost:5000/flask');
+    const response = await axios.get(`${config.flaskServiceUrl}/flask`);
     res.send(response.data);
   } catch (error) {
     console.error('Error communicating with Flask server:', error);
@@ -30,7 +57,7 @@ app.get('/home', async (req, res) => {
 // Get model information
 app.get('/api/model-info', async (req, res) => {
   try {
-    const response = await axios.get('http://localhost:5000/model_info');
+    const response = await axios.get(`${config.flaskServiceUrl}/model_info`);
     res.json(response.data);
   } catch (error) {
     console.error('Error getting model info:', error);
@@ -41,14 +68,19 @@ app.get('/api/model-info', async (req, res) => {
 // Predict from uploaded image (protected)
 app.post('/api/predict', requireAuth, async (req, res) => {
   try {
-    const { imagePath } = req.body;
+    const { imageId } = req.body;
     
-    if (!imagePath) {
-      return res.status(400).json({ error: 'Image path is required' });
+    if (!imageId || !mongoose.isValidObjectId(imageId)) {
+      return res.status(400).json({ error: 'A valid image ID is required' });
     }
 
-    const response = await axios.post('http://localhost:5000/predict_from_path', {
-      image_path: imagePath
+    const image = await Image.findOne({ _id: imageId, userId: req.user._id });
+    if (!image) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+
+    const response = await axios.post(`${config.flaskServiceUrl}/predict_from_path`, {
+      image_path: image.filePath
     });
     
     res.json(response.data);
@@ -62,32 +94,6 @@ app.post('/api/predict', requireAuth, async (req, res) => {
   }
 });
 
-// Updated CORS configuration
-app.use(cors({
-  origin: ['http://localhost:3000'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Access-Control-Allow-Credentials']
-}));
-
-app.use(express.json());
-
-// Middlewares
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'fallback-secret-key',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: false,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    httpOnly: true, // Prevents XSS attacks
-    sameSite: 'lax' // Helps prevent CSRF attacks
-  }
-}));
-
-app.use(passport.initialize());
-app.use(passport.session());
-
 // Auth routes
 app.use('/auth', authRoutes);
 app.use('/api/upload', requireAuth, uploadRoutes);
@@ -98,8 +104,8 @@ app.use('/api/dashboard', dashboardRoutes);
 
 // Connect to database 
 connectDB().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+  app.listen(config.port, () => {
+    console.log(`Server is running on port ${config.port}`);
   });
 }).catch((error) => {
   console.error('Failed to connect to database:', error);

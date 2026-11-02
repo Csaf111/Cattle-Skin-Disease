@@ -6,7 +6,8 @@
   "scripts": {
     "start": "nodemon index.js",
     "dev": "nodemon index.js",
-    "flask": "python flask_server.py"
+    "flask": "python flask_server.py",
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",
